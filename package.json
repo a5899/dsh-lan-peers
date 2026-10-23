@@ -1,0 +1,41 @@
+{
+  "name": "dsh-lan-peers",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LAN peer questions and notifications between DSH installs on the same subnet. Off by default; only acts when the user explicitly asks. Adds a settings page under Settings → Plugins.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node test/selftest.mjs && node test/live.mjs && node test/tools.mjs && node test/e2e-process.mjs && node test/client-contract.mjs && node test/client-render.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [],
+      "platform": "web"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "os": [
+    "win32",
+    "darwin",
+    "linux"
+  ],
+  "license": "MIT"
+}

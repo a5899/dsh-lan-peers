@@ -1,0 +1,19 @@
+# dsh-lan-peers bundle layer.
+#
+# Registering the package in `dsh.profile.bundles` makes DSH require a
+# `dsh.bundle.patch`; this file declares the plugin's own loader entry so the
+# bundle installs and toggles like any other profile layer.
+- insert:
+    - id: lan-peers
+      name: 'dsh-lan-peers'
+      config:
+        enabled: false
+        displayName: ''
+        listenPort: 45715
+        discoveryPort: 45714
+        multicastGroup: 239.255.77.77
+        passphrase: ''
+        allowSameSubnet: true
+        manualPeers: ''
+        askTimeoutMs: 120000
+        maxMessageChars: 8000
