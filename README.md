@@ -11,14 +11,59 @@
 | 你说「把这段配置告诉书房的 DSH」 | 模型 `lan_peer_tell` 推过去 |
 | 功能没开 | 工具会回答「功能当前关闭，去 设置 → 插件 → LAN 邻居 打开」 |
 
-## 安装位置（本机已装）
+## 安装
 
-```
-C:\Users\a5093\.dsh\profiles\desktop\node_modules\dsh-lan-peers\
+本插件是普通的 DSH profile 插件包，需要**两台（或多台）设备都装**。
+
+### 方式 A：从 GitHub 装（推荐）
+
+在 DSH 的 profile 目录里执行（把 `<profile>` 换成你的 profile 名，桌面版是 `desktop`）：
+
+```powershell
+cd $env:USERPROFILE\.dsh\profiles\<profile>
+git clone https://github.com/a5899/dsh-lan-peers.git node_modules/dsh-lan-peers
 ```
 
-`profile/cordis.patch.yml` 末尾有 `id: lan-peers` 条目（`enabled: false` 起步）。
-**装完要重启 DSH** 才会加载（DSH 的插件代码只在进程启动时 import）。
+然后编辑同一个目录下的 `package.json`，加两处：
+
+```jsonc
+{
+  "dependencies": {
+    // …已有依赖…
+    "dsh-lan-peers": "file:./node_modules/dsh-lan-peers"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        // …已有 bundle…
+        "dsh-lan-peers"
+      ]
+    }
+  }
+}
+```
+
+### 方式 B：插件市场
+
+如果装了 `dshmarket`，在 DSH 的**设置 → 插件**里也能安装/启停。
+
+### 装完之后
+
+1. **重启 DSH**（插件代码只在进程启动时 import，热更新不会加载新包）。
+2. 打开 **设置 → 插件 → LAN 邻居**，勾选「启用内网互询」，点「保存并应用」。
+3. 首次启用时 Windows 防火墙可能弹窗，**允许** UDP 45714 与 TCP 45715。
+4. 两台设备用**同一个口令**（或都留空且在同一网段），然后互相点「扫描内网设备」。
+
+> ⚠️ 三个前提缺一不可：**两端都装了本插件**、**两端都启用了**、**在同一内网**。
+> 任何一端没开，另一端都扫不到它。
+
+### 排障：如果按钮报错或页面空白
+
+插件会把启动结果写进 `~/.dsh/plugins/dsh-lan-peers/diagnostics.json`：
+
+- `routeInfo.kind` 为 `connection` → 路由注册正常
+- 为 `failed` → 里面带 `error`，直接反映了原因
+- `configProblems` 非空 → 宿主给的配置字段类型不对，插件已回退默认值
 
 ## 设置页
 
@@ -106,10 +151,14 @@ New-NetFirewallRule -DisplayName "DSH LAN peers (peer)" -Direction Inbound -Prot
 ## 测试
 
 ```powershell
-cd C:\Users\a5093\Documents\deepseek-harness\default-workspace\lan-peers
-npm test                        # 全部 10 组
-node test/render-viewer.mjs     # 另外：用真实 Chromium 在手机/桌面宽度截图到 test/shots/
+cd dsh-lan-peers     # 本包根目录
+npm test             # 全部 10 组，不需要 DSH 在运行
+node test/verify-installed.mjs   # 冒烟：插件能否注册全部路由
+node test/render-viewer.mjs      # 可选：用本机 Chromium 在手机/桌面宽度截图到 test/shots/
 ```
+
+> `test/verify-live-config.mjs` 会读取本机真实 profile 的配置，若 45714/45715 已被运行中的
+> DSH 占用则直接跳过（这是预期行为）。
 
 | 测试 | 覆盖 |
 |---|---|

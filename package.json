@@ -1,8 +1,8 @@
 {
   "name": "dsh-lan-peers",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
-  "description": "LAN peer questions and notifications between DSH installs on the same subnet. Off by default; only acts when the user explicitly asks. Adds a settings page under Settings → Plugins.",
+  "description": "DSH plugin: LAN peer discovery, cross-device ask/tell/conversation between DSH installs on the same subnet, with a mobile-friendly transcript viewer. Off by default; only acts when the user asks.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -16,7 +16,8 @@
     "lib/client.js",
     "lib/viewer.js",
     "cordis.patch.yml",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "test": "node test/config.mjs && node test/routes.mjs && node test/selftest.mjs && node test/live.mjs && node test/tools.mjs && node test/e2e-process.mjs && node test/chat.mjs && node test/lan-reach.mjs && node test/client-contract.mjs && node test/client-render.mjs",
@@ -39,5 +40,23 @@
     "darwin",
     "linux"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/a5899/dsh-lan-peers.git"
+  },
+  "homepage": "https://github.com/a5899/dsh-lan-peers",
+  "bugs": {
+    "url": "https://github.com/a5899/dsh-lan-peers/issues"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "lan",
+    "multicast",
+    "peer-to-peer",
+    "discovery",
+    "conversation"
+  ]
 }
