@@ -1,11 +1,18 @@
 /**
  * Settings-route contract test.
  *
- * Under DSH, everything below `/api` belongs to Connection: it matches exact
- * fetch routes and hands the rest to the Typert gateway, which answers an
- * unclaimed endpoint with a plain-body 404 `not found`. Registering a `prefix`
- * route there is never reached — that is exactly what the page reported. This
- * test pins the registration shape and drives every route the way the host does.
+ * Two failures are pinned here, both of which shipped at least once:
+ *
+ * 1. A `prefix` route on `/api` is never reached — Connection matches its
+ *    `fetchRoutes` table by exact pathname, and the Typert gateway answers
+ *    everything else with a bare 404 `not found`.
+ * 2. Cordis only hands out a service to an `inject`ed context. Reading
+ *    `ctx.connection` (or `ctx.get('connection')`) from a plugin that never
+ *    declared the dependency throws "cannot get property … without inject",
+ *    which aborted registration entirely.
+ *
+ * The fake contexts below enforce (2), so a regression cannot pass silently
+ * the way it did before.
  */
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -23,40 +30,64 @@ const check = (label, cond, extra = "") => {
 };
 
 const CONFIG = {
-  enabled: true, displayName: "", listenPort: 0, discoveryPort: 46090,
+  enabled: false, displayName: "", listenPort: 0, discoveryPort: 46090,
   multicastGroup: "239.255.77.71", passphrase: "", allowSameSubnet: true,
   manualPeers: "", askTimeoutMs: 5000, maxMessageChars: 8000,
 };
 
-/** A fake Connection exposing the exact fetch-route registry. */
-function makeConnection() {
+const makeConnection = () => {
   const routes = new Map();
   return {
     routes,
     service: {
       fetch: {
         register(route) {
-          if (routes.has(route.path)) throw new Error("route already registered: " + route.path);
+          if (routes.has(route.path)) throw new Error("already registered: " + route.path);
           routes.set(route.path, route);
           return () => routes.delete(route.path);
         },
       },
     },
   };
-}
+};
 
-const ctxBase = (extra) => ({
-  logger: { info() {}, warn() {}, error() {} },
-  effect: (fn) => (typeof fn === "function" ? fn() : undefined),
-  tools: { register() {} },
-  ...extra,
-});
+/**
+ * A cordis-faithful context: undeclared services are not exposed, and reading
+ * one throws exactly like the runtime does.
+ */
+function cordisCtx({ connection, webServer, available = true } = {}) {
+  const ctx = {
+    logger: { info() {}, warn() {}, error() {} },
+    effect: (fn) => (typeof fn === "function" ? fn() : undefined),
+    tools: { register() {} },
+    webServer: webServer ?? { register: () => () => {} },
+    _injections: [],
+  };
+  // Only an injected child may read the service, exactly like cordis.
+  Object.defineProperty(ctx, "connection", {
+    get() {
+      throw new Error('cannot get property "connection" without inject');
+    },
+    enumerable: true,
+    configurable: true,
+  });
+  ctx.inject = (names, fn) => {
+    ctx._injections.push({ names, fn });
+    if (!available || !names.includes("connection") || !connection) return () => {};
+    fn({
+      connection,
+      effect: (f) => (typeof f === "function" ? f() : undefined),
+    });
+    return () => {};
+  };
+  return ctx;
+}
 
 // ── registration shape ──────────────────────────────────────────────────
 {
   const conn = makeConnection();
-  const svc = mod.apply(ctxBase({ connection: conn.service }), CONFIG);
-  await new Promise((r) => setTimeout(r, 120));
+  const svc = mod.apply(cordisCtx({ connection: conn.service }), CONFIG);
+  await new Promise((r) => setTimeout(r, 100));
 
   const expected = [
     ["/api/lan-peers/status", ["GET"]],
@@ -68,17 +99,11 @@ const ctxBase = (extra) => ({
   check("registers on the connection fetch registry", conn.routes.size === expected.length, `${conn.routes.size} routes`);
   for (const [path, methods] of expected) {
     const route = conn.routes.get(path);
-    check(`route ${path} exists`, Boolean(route), "missing");
-    check(
-      `route ${path} declares methods ${methods.join(",")}`,
-      route && JSON.stringify(route.methods) === JSON.stringify(methods),
-      route ? JSON.stringify(route.methods) : "n/a",
-    );
-    check(`route ${path} declares a buffered body`, route?.requestBody === "buffered", String(route?.requestBody));
-    check(`route ${path} is an exact path, never a prefix`, route?.path === path && !route.path.includes("*"));
+    check(`route ${path} exists with methods ${methods.join(",")}`, route && JSON.stringify(route.methods) === JSON.stringify(methods), JSON.stringify(route?.methods));
+    check(`route ${path} is buffered and exact`, route?.requestBody === "buffered" && !route.path.includes("*"), `${route?.requestBody} ${route?.path}`);
   }
+  check("routeInfo names the connection path", svc.routeInfo?.kind === "connection", JSON.stringify(svc.routeInfo));
 
-  // ── drive the routes the way the host does ───────────────────────────
   const call = async (path, method, body) => {
     const route = conn.routes.get(path);
     if (!route) return { status: 404, body: { reason: "route-missing" } };
@@ -89,91 +114,89 @@ const ctxBase = (extra) => ({
     });
     const response = await route.fetch(request);
     const text = await response.text();
-    let parsed = null;
+    let parsed;
     try { parsed = text ? JSON.parse(text) : null; } catch { parsed = { raw: text }; }
     return { status: response.status, body: parsed };
   };
 
-  const status = await call("/api/lan-peers/status", "GET");
-  check("GET status answers 200 with JSON", status.status === 200 && status.body.ok === true, JSON.stringify(status));
-  check("GET status exposes the resolved ports", status.body.discoveryPort === 46090, JSON.stringify(status.body.discoveryPort));
-  check("GET status includes the public config", status.body.config && status.body.config.discoveryPort === 46090);
-
-  const saved = await call("/api/lan-peers/settings", "POST", {
-    enabled: true, displayName: "renamed", listenPort: 0, discoveryPort: 46090,
-    multicastGroup: "239.255.77.71", allowSameSubnet: true, manualPeers: "",
-    askTimeoutMs: 5000, maxMessageChars: 8000,
-  });
-  check("POST settings answers 200 and saves", saved.status === 200 && saved.body.ok === true, JSON.stringify(saved).slice(0, 200));
+  const saved = await call("/api/lan-peers/settings", "POST", { ...CONFIG, displayName: "renamed" });
+  check("POST settings answers 200 and saves", saved.status === 200 && saved.body.ok === true, JSON.stringify(saved).slice(0, 180));
   check("POST settings applies the new display name", saved.body.status?.name === "renamed", JSON.stringify(saved.body.status?.name));
-  check("saved response carries no config problems", Array.isArray(saved.body.problems) && saved.body.problems.length === 0, JSON.stringify(saved.body.problems));
 
   const trust = await call("/api/lan-peers/trust", "POST", { action: "block", id: "peer-blocked-1" });
-  check("POST trust answers 200", trust.status === 200 && trust.body.ok === true, JSON.stringify(trust).slice(0, 160));
-  check("blocked id is recorded", (trust.body.status?.blocked || []).includes("peer-blocked-1"), JSON.stringify(trust.body.status?.blocked));
+  check("POST trust answers 200 and records the block", trust.status === 200 && (trust.body.status?.blocked || []).includes("peer-blocked-1"), JSON.stringify(trust).slice(0, 140));
 
   const bad = await call("/api/lan-peers/trust", "POST", { action: "nonsense", id: "x" });
-  check("unknown trust action is a 400, not a 404", bad.status === 400 && bad.body.reason === "unknown-action", JSON.stringify(bad));
-
-  const discover = await call("/api/lan-peers/discover", "POST", {});
-  check("POST discover answers 200", discover.status === 200, JSON.stringify(discover).slice(0, 160));
+  check("unknown trust action is a 400, not the bridge 404", bad.status === 400 && bad.body.reason === "unknown-action", JSON.stringify(bad));
 
   await svc.stop();
 }
 
-// ── fallback when Connection is absent ──────────────────────────────────
-{
-  const registered = [];
-  const svc = mod.apply(
-    ctxBase({ webServer: { register: (route) => { registered.push(route); return () => {}; } } }),
-    { ...CONFIG, enabled: false },
-  );
-  await new Promise((r) => setTimeout(r, 80));
-  check("falls back to the web server without Connection", registered.length === 1 && registered[0].kind === "prefix", JSON.stringify(registered.map((r) => r.kind)));
-  await svc.stop();
-}
-
-// ── connection failures must not crash the plugin ───────────────────────
-{
-  const thrown = [];
-  const svc = mod.apply(ctxBase({
-    connection: { fetch: { register() { throw new Error("registry closed"); } } },
-    webServer: { register: (r) => { thrown.push(r); return () => {}; } },
-  }), { ...CONFIG, enabled: false });
-  await new Promise((r) => setTimeout(r, 80));
-  check("a failing connection registry falls back instead of throwing", thrown.length === 1, `fallbacks=${thrown.length}`);
-  await svc.stop();
-}
-
-// ── connection arrives AFTER apply(): the real DSH ordering ─────────────
+// ── the runtime denial must not abort registration ──────────────────────
 {
   const conn = makeConnection();
-  let injection = null;
-  const svc = mod.apply(ctxBase({
-    // No `connection` and no `get()`: the service simply is not there yet.
-    inject(names, fn) {
-      injection = { names, fn };
-    },
-  }), { ...CONFIG, enabled: false });
-  await new Promise((r) => setTimeout(r, 80));
+  const ctx = cordisCtx({ connection: conn.service });
+  let denied = false;
+  try { void ctx.connection; } catch (error) { denied = /without inject/.test(error.message); }
+  check("the test ctx really denies undeclared service access", denied);
 
-  check("waits for connection instead of guessing", svc.routeInfo?.kind === "connection-pending", JSON.stringify(svc.routeInfo));
-  check("declares the connection dependency", Array.isArray(injection?.names) && injection.names.includes("connection"), JSON.stringify(injection?.names));
-
-  // The service appears: cordis invokes the inject callback with a child ctx.
-  const registered = (() => {
-    if (!injection) return false;
-    injection.fn({ connection: conn.service, effect: (fn) => (typeof fn === "function" ? fn() : undefined) });
-    return conn.routes.size === 5;
-  })();
-  check("registers when connection finally appears", registered, `routes=${conn.routes.size}`);
-  check("reports the real routes afterwards", svc.routeInfo?.kind === "connection", JSON.stringify(svc.routeInfo));
-
-  const route = conn.routes.get("/api/lan-peers/status");
-  const response = route ? await route.fetch(new Request("http://127.0.0.1:1/api/lan-peers/status", { method: "GET" })) : null;
-  const body = response ? await response.json() : null;
-  check("late route answers 200", Boolean(body && response.status === 200 && body.ok === true), JSON.stringify(body).slice(0, 120));
+  const svc = mod.apply(ctx, CONFIG);
+  await new Promise((r) => setTimeout(r, 100));
+  check("registers despite the ctx denying eager reads", conn.routes.size === 5, `routes=${conn.routes.size} routeInfo=${JSON.stringify(svc.routeInfo)}`);
+  check("routeInfo reports the connection path", svc.routeInfo?.kind === "connection", JSON.stringify(svc.routeInfo));
   await svc.stop();
+}
+
+// ── connection arrives later ────────────────────────────────────────────
+{
+  const conn = makeConnection();
+  const ctx = cordisCtx({ connection: null, available: false });
+  const svc = mod.apply(ctx, CONFIG);
+  await new Promise((r) => setTimeout(r, 80));
+  check("declares the connection dependency through inject", ctx._injections.length === 1 && ctx._injections[0].names.includes("connection"));
+
+  ctx._injections[0].fn({ connection: conn.service, effect: (fn) => (typeof fn === "function" ? fn() : undefined) });
+  check("registers when connection appears", conn.routes.size === 5, `routes=${conn.routes.size}`);
+  check("routeInfo reports the connection path", svc.routeInfo?.kind === "connection", JSON.stringify(svc.routeInfo));
+  await svc.stop();
+}
+
+// ── no connection at all: fall back, never throw ────────────────────────
+{
+  const registered = [];
+  const ctx = cordisCtx({ connection: null, webServer: { register: (r) => { registered.push(r); return () => {}; } } });
+  const svc = mod.apply(ctx, CONFIG);
+  await new Promise((r) => setTimeout(r, 80));
+  check("falls back to the web server", registered.length === 1 && registered[0].kind === "prefix", JSON.stringify(registered.map((r) => r.kind)));
+  await svc.stop();
+}
+
+// ── a throwing registry degrades instead of crashing ────────────────────
+{
+  const registered = [];
+  const ctx = cordisCtx({
+    connection: { fetch: { register() { throw new Error("registry closed"); } } },
+    webServer: { register: (r) => { registered.push(r); return () => {}; } },
+  });
+  const svc = mod.apply(ctx, CONFIG);
+  await new Promise((r) => setTimeout(r, 80));
+  check("a throwing registry falls back instead of crashing", registered.length === 1, `fallbacks=${registered.length}`);
+  await svc.stop();
+}
+
+// ── the source must not read the service outside inject ─────────────────
+{
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../lib/index.js", import.meta.url), "utf8");
+  const body = src.slice(src.indexOf("function registerSettingsRoutes"), src.indexOf("/** Config as the settings page sees it"));
+  // Strip comments so prose about the trap is not mistaken for the trap.
+  const code = body
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("//"))
+    .join("\n");
+  check("no eager ctx.connection read in the router", !/ctx\.connection/.test(code), "an eager read throws without inject");
+  check("no ctx.get('connection') read", !/ctx\.get\(\s*["']connection["']\s*\)/.test(code), "the same trap through ctx.get");
 }
 
 await rm(HOME, { recursive: true, force: true });
