@@ -22,7 +22,7 @@ import { existsSync, readFileSync as readFileSyncFile } from "node:fs";
 
 const mod = await import("../lib/index.js");
 const { LanPeersService } = mod;
-const { applyConfigToPatchText, yamlScalar, persistOwnPatch, ownPatchPath } = await import("../lib/patches.js");
+const { applyConfigToPatchText, yamlScalar, persistOwnPatch, tryPersistOwnPatch, ownPatchPath } = await import("../lib/patches.js");
 
 let fails = 0;
 const check = (label, cond, extra = "") => {
@@ -181,8 +181,21 @@ const ROOT = await mkdtemp(join(tmpdir(), "lan-peers-patch-"));
   check("the file now carries the new values", after.includes("enabled: true") && after.includes("displayName: 'phone'"), after);
   check("unrelated entries survive the write", after.includes("other-plugin"));
 
+  // Re-saving the same values must count as SUCCESS: the file already holds
+  // them, so the settings are durable. Reporting failure here is what made an
+  // unchanged save look broken in the UI.
   const again = await persistOwnPatch("dsh-lan-peers", "lan-peers", cfg({ enabled: true, displayName: "phone" }), { fromUrl });
-  check("an unchanged write is a no-op", again === false, String(again));
+  check("an unchanged save still reports success", again === true, String(again));
+
+  const detail = await tryPersistOwnPatch("dsh-lan-peers", "lan-peers", cfg({ enabled: true, displayName: "phone" }), { fromUrl });
+  check("the outcome says unchanged, not written", detail.outcome === "unchanged" && detail.written === true && detail.changed === false, JSON.stringify(detail));
+
+  const missing = await tryPersistOwnPatch("dsh-lan-peers", "lan-peers", {}, { file: join(tmpdir(), "definitely-missing-" + process.pid + ".yml") });
+  check("a missing file is a real failure", missing.outcome === "missing" && missing.written === false, JSON.stringify(missing));
+  check("and it explains where it looked", String(missing.reason).includes("not found"), missing.reason);
+
+  const noEntry = await tryPersistOwnPatch("dsh-lan-peers", "not-an-entry", {}, { fromUrl });
+  check("an unknown entry is its own failure", noEntry.outcome === "no-entry" && noEntry.written === false, JSON.stringify(noEntry));
 }
 await rm(ROOT, { recursive: true, force: true });
 
