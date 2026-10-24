@@ -1,6 +1,6 @@
 {
   "name": "dsh-lan-peers",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "private": true,
   "description": "DSH plugin: LAN peer discovery, cross-device ask/tell/conversation between DSH installs on the same subnet, with a mobile-friendly transcript viewer. Off by default; only acts when the user asks.",
   "type": "module",

@@ -33,10 +33,12 @@ const ctx = {
   webServer: { register: () => () => {} },
 };
 const svc = mod.apply(ctx, {
+  // keep every write inside the temp home
   enabled: true, displayName: "REMOTE-PEER", listenPort: 0, discoveryPort: 46030,
   multicastGroup: "239.255.77.60", passphrase: "e2e-secret", allowSameSubnet: true,
   manualPeers: "", askTimeoutMs: 8000, maxMessageChars: 8000,
 });
+svc.patchFile = process.env.DSH_HOME + "/never-written.yml";
 await new Promise((r) => setTimeout(r, 300));
 process.stdout.write("PEER_READY " + svc.httpPort + " " + svc.identity.id + "\\n");
 // Stay alive until the parent closes stdin.
@@ -83,6 +85,7 @@ if (up) {
     multicastGroup: "239.255.77.60", passphrase: "e2e-secret", allowSameSubnet: true,
     manualPeers: "", askTimeoutMs: 8000, maxMessageChars: 8000,
   });
+  local.patchFile = join(HOME, "local-never-written.yml");
   await new Promise((r) => setTimeout(r, 120));
   const askTool = registered.find((t) => t.name === "lan_peer_ask");
   const tellTool = registered.find((t) => t.name === "lan_peer_tell");
