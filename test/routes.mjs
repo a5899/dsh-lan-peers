@@ -145,6 +145,37 @@ const ctxBase = (extra) => ({
   await svc.stop();
 }
 
+// ── connection arrives AFTER apply(): the real DSH ordering ─────────────
+{
+  const conn = makeConnection();
+  let injection = null;
+  const svc = mod.apply(ctxBase({
+    // No `connection` and no `get()`: the service simply is not there yet.
+    inject(names, fn) {
+      injection = { names, fn };
+    },
+  }), { ...CONFIG, enabled: false });
+  await new Promise((r) => setTimeout(r, 80));
+
+  check("waits for connection instead of guessing", svc.routeInfo?.kind === "connection-pending", JSON.stringify(svc.routeInfo));
+  check("declares the connection dependency", Array.isArray(injection?.names) && injection.names.includes("connection"), JSON.stringify(injection?.names));
+
+  // The service appears: cordis invokes the inject callback with a child ctx.
+  const registered = (() => {
+    if (!injection) return false;
+    injection.fn({ connection: conn.service, effect: (fn) => (typeof fn === "function" ? fn() : undefined) });
+    return conn.routes.size === 5;
+  })();
+  check("registers when connection finally appears", registered, `routes=${conn.routes.size}`);
+  check("reports the real routes afterwards", svc.routeInfo?.kind === "connection", JSON.stringify(svc.routeInfo));
+
+  const route = conn.routes.get("/api/lan-peers/status");
+  const response = route ? await route.fetch(new Request("http://127.0.0.1:1/api/lan-peers/status", { method: "GET" })) : null;
+  const body = response ? await response.json() : null;
+  check("late route answers 200", Boolean(body && response.status === 200 && body.ok === true), JSON.stringify(body).slice(0, 120));
+  await svc.stop();
+}
+
 await rm(HOME, { recursive: true, force: true });
 console.log(fails === 0 ? "\nROUTES PASS" : `\n${fails} FAILED`);
 process.exitCode = fails === 0 ? 0 : 1;
