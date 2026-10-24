@@ -57,7 +57,18 @@ const makeConnection = () => {
  * A cordis-faithful context: undeclared services are not exposed, and reading
  * one throws exactly like the runtime does.
  */
-function cordisCtx({ connection, webServer, available = true } = {}) {
+/**
+ * A cordis-faithful context.
+ *
+ * The real rule (cordis `Context.handler.get`) is: walk the fiber chain; a
+ * service reachable from a fiber whose `inject` declares it is readable, and
+ * anything else throws `cannot get property "<x>" without inject`.
+ *
+ * This test passes the plugin's own module-level `inject` list in, so a service
+ * is exposed exactly when the plugin declared it — the check that would have
+ * caught the missing `connection` declaration.
+ */
+function cordisCtx({ connection, webServer, declared = mod.inject || [], available = true } = {}) {
   const ctx = {
     logger: { info() {}, warn() {}, error() {} },
     effect: (fn) => (typeof fn === "function" ? fn() : undefined),
@@ -65,37 +76,38 @@ function cordisCtx({ connection, webServer, available = true } = {}) {
     _injections: [],
     _webInjections: [],
   };
-  // Only an injected child may read the service, exactly like cordis.
-  Object.defineProperty(ctx, "connection", {
-    get() {
-      throw new Error('cannot get property "connection" without inject');
-    },
-    enumerable: true,
-    configurable: true,
-  });
+  const expose = (name, value) => {
+    Object.defineProperty(ctx, name, {
+      get() {
+        if (value === undefined) throw new Error(`cannot get property "${name}" without inject`);
+        return value;
+      },
+      enumerable: true,
+      configurable: true,
+    });
+  };
+  if (declared.includes("connection")) expose("connection", connection ?? undefined);
+  else expose("connection", undefined);
+  if (declared.includes("webServer")) expose("webServer", webServer ?? undefined);
+  else expose("webServer", undefined);
+
+  // `ctx.inject(names, fn)` mounts fn as a sub-plugin with its own deps.
   ctx.inject = (names, fn) => {
     const child = {
-      connection,
-      webServer,
+      connection: names.includes("connection") ? connection : undefined,
+      webServer: names.includes("webServer") ? webServer : undefined,
       effect: (f) => (typeof f === "function" ? f() : undefined),
     };
     if (names.includes("connection")) {
       ctx._injections.push({ names, fn });
       if (available && connection) fn(child);
-    } else if (names.includes("webServer")) {
+    }
+    if (names.includes("webServer")) {
       ctx._webInjections.push({ names, fn });
       if (available && webServer) fn(child);
     }
     return () => {};
   };
-  // webServer is also only visible through inject.
-  Object.defineProperty(ctx, "webServer", {
-    get() {
-      throw new Error('cannot get property "webServer" without inject');
-    },
-    enumerable: true,
-    configurable: true,
-  });
   return ctx;
 }
 
@@ -155,9 +167,11 @@ function cordisCtx({ connection, webServer, available = true } = {}) {
 {
   const conn = makeConnection();
   const ctx = cordisCtx({ connection: conn.service });
+  // A ctx that did NOT declare the dependency must still deny access.
+  const undeclared = cordisCtx({ connection: conn.service, declared: ["tools"] });
   let denied = false;
-  try { void ctx.connection; } catch (error) { denied = /without inject/.test(error.message); }
-  check("the test ctx really denies undeclared service access", denied);
+  try { void undeclared.connection; } catch (error) { denied = /without inject/.test(error.message); }
+  check("a ctx without the declaration still denies access", denied);
 
   const svc = mod.apply(ctx, CONFIG);
   await new Promise((r) => setTimeout(r, 100));
@@ -172,11 +186,14 @@ function cordisCtx({ connection, webServer, available = true } = {}) {
   const ctx = cordisCtx({ connection: null, available: false });
   const svc = mod.apply(ctx, CONFIG);
   await new Promise((r) => setTimeout(r, 80));
-  check("declares the connection dependency through inject", ctx._injections.length === 1 && ctx._injections[0].names.includes("connection"));
+  check("declares the connection dependency at module level", Array.isArray(mod.inject) && mod.inject.includes("connection"), JSON.stringify(mod.inject));
 
-  ctx._injections[0].fn({ connection: conn.service, effect: (fn) => (typeof fn === "function" ? fn() : undefined) });
-  check("registers when connection appears", conn.routes.size === ROUTE_COUNT, `routes=${conn.routes.size}`);
-  check("routeInfo reports the connection path", svc.routeInfo?.kind === "connection", JSON.stringify(svc.routeInfo));
+  const lateCtx = cordisCtx({ connection: conn.service });
+  const lateSvc = mod.apply(lateCtx, CONFIG);
+  await new Promise((r) => setTimeout(r, 60));
+  check("registers when connection is available at apply time", conn.routes.size === ROUTE_COUNT, `routes=${conn.routes.size}`);
+  check("the late service reports the connection path", lateSvc.routeInfo?.kind === "connection", JSON.stringify(lateSvc.routeInfo));
+  await lateSvc.stop();
   await svc.stop();
 }
 
@@ -207,15 +224,15 @@ function cordisCtx({ connection, webServer, available = true } = {}) {
 {
   const { readFileSync } = await import("node:fs");
   const src = readFileSync(new URL("../lib/index.js", import.meta.url), "utf8");
-  const body = src.slice(src.indexOf("function registerSettingsRoutes"), src.indexOf("/** Config as the settings page sees it"));
-  // Strip comments so prose about the trap is not mistaken for the trap.
-  const code = body
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .split("\n")
-    .filter((line) => !line.trim().startsWith("//"))
-    .join("\n");
-  check("no eager ctx.connection read in the router", !/ctx\.connection/.test(code), "an eager read throws without inject");
-  check("no ctx.get('connection') read", !/ctx\.get\(\s*["']connection["']\s*\)/.test(code), "the same trap through ctx.get");
+  // Reading ctx.connection inside the router is only legal because the module
+  // declares the dependency. Pin the pairing, not the absence of the read.
+  const declares = Array.isArray(mod.inject) && mod.inject.includes("connection");
+  check("the module declares connection in its top-level inject", declares, JSON.stringify(mod.inject));
+  check(
+    "the router reads ctx.connection only under that declaration",
+    !/ctx\.connection/.test(src.slice(src.indexOf("function registerSettingsRoutes"))) || declares,
+    "an undeclared eager read throws under cordis",
+  );
 }
 
 await rm(HOME, { recursive: true, force: true });

@@ -31,24 +31,28 @@ const ctx = {
     events.push("inject " + JSON.stringify(names));
     setTimeout(() => {
       const child = { effect: (f) => (typeof f === "function" ? f() : undefined) };
-      if (names.includes("connection")) {
-        child.connection = {
-          fetch: {
-            register(route) {
-              routes.set(route.path, route);
-              return () => routes.delete(route.path);
-            },
-          },
-        };
-      }
-      if (names.includes("webServer")) {
-        child.webServer = { register: () => () => {} };
-      }
+      if (names.includes("connection")) child.connection = connectionService;
+      if (names.includes("webServer")) child.webServer = { register: () => () => {} };
       fn(child);
       events.push(`callback ${JSON.stringify(names)} done; total routes=${routes.size}`);
     }, 20);
   },
 };
+
+// Cordis rule: a service the plugin declares in its module-level `inject` is
+// readable straight off the context. Expose exactly the declared ones.
+const connectionService = {
+  fetch: {
+    register(route) {
+      routes.set(route.path, route);
+      return () => routes.delete(route.path);
+    },
+  },
+};
+for (const name of mod.inject || []) {
+  const value = name === "connection" ? connectionService : { register: () => () => {} };
+  Object.defineProperty(ctx, name, { get: () => value, enumerable: true, configurable: true });
+}
 
 const svc = mod.apply(ctx, {
   enabled: false, displayName: "", listenPort: 45715, discoveryPort: 45714,
