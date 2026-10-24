@@ -1,5 +1,34 @@
 # 更新记录
 
+## 1.3.2 — 2026-10-24
+
+### 严重修复：模型回复会让 DSH 整个崩掉
+
+手机一提问，桌面 DSH 直接弹「应用无法启动或已意外停止」，日志里是
+`NO_ADAPTER: no adapter registered for provider "undefined"`。
+
+**原因**：我误以为 `llm.listModels()` 无参返回整张目录，实际契约是
+`listModels(providerId)` —— 不给 provider 就抛 `NO_ADAPTER`。这个异常从
+`pickModel()` 一路穿过 `answerFor()` 和入站处理器，直接终止了宿主进程。
+
+**修法**（三重）：
+
+1. 正确调用：`llm.listProviders()` 拿路由列表，再对每个 `id` 调 `listModels(id)`；
+   某个 provider 报错就跳过它，不中断。
+2. 不放行残缺路由：`generateReply()` 在碰适配器之前校验 `provider`/`model` 都是非空字符串，
+   避免再发出 `provider: undefined` 的请求。
+3. **任何异常都不许逃逸**：`pickModel` / `modelRoute` / `generateReply` / `answerFor`
+   逐层 try/catch，最外层兜住并退回固定回答。一个「生成回复」功能绝不该能搞崩宿主。
+
+### 测试
+
+新增 `test/llm-shape.mjs`，用**与崩溃现场相同的严格契约**（无参数调 `listModels` 会抛
+`NO_ADAPTER`）来验证：`pickModel` 永不抛、永远带 provider 调用、残缺路由被拒、
+同步抛错被兜住、字符串/对象两种 provider 形态都支持。
+
+之前的 `model.mjs` 用的假 `llm` 是错误契约（无参返回目录），所以测试全绿而线上崩溃 ——
+已按真实契约重写。
+
 ## 1.3.1 — 2026-10-24
 
 ### 修复：内容没变时保存被误报为失败

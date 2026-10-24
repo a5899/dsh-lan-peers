@@ -29,11 +29,23 @@ const check = (label, cond, extra = "") => {
 };
 
 // ── a fake llm service with the real stream shape ───────────────────────
-function makeLlm({ reply = "模型生成的回答", failWith = null, slowMs = 0, models } = {}) {
+function makeLlm({ reply = "模型生成的回答", failWith = null, slowMs = 0, providers } = {}) {
   const calls = [];
+  // Mirrors the REAL contract: listProviders() lists routes, listModels(id)
+  // takes one and throws NO_ADAPTER without it — the shape that crashed DSH.
+  const routes = providers ?? [{ id: "deepseek-account", api: "dedicated", models: ["deepseek-flash"] }];
   const service = {
-    listModels() {
-      return models ?? [{ provider: "deepseek-account", api: "dedicated", models: [{ id: "deepseek-flash", name: "Flash" }] }];
+    listProviders() {
+      return routes.map((r) => ({ id: r.id, name: r.name ?? r.id, api: r.api }));
+    },
+    listModels(provider) {
+      if (provider === undefined || provider === null || provider === "") {
+        const error = new Error('no adapter registered for provider "undefined"');
+        error.code = "NO_ADAPTER";
+        throw error;
+      }
+      const hit = routes.find((r) => r.id === provider);
+      return (hit?.models ?? []).map((id) => ({ id, name: id }));
     },
     stream(options) {
       calls.push(options);
@@ -64,8 +76,8 @@ const cfg = (over) => ({
   const { service } = makeLlm();
   const route = pickModel(service);
   check("picks a usable model route", route?.provider === "deepseek-account" && route.model === "deepseek-flash", JSON.stringify(route));
-  check("no catalog yields no route", pickModel({ listModels: () => [] }) === undefined);
-  check("an empty model list is rejected", pickModel({ listModels: () => [{ provider: "x", api: "dedicated", models: [] }] }) === undefined);
+  check("no providers yields no route", pickModel({ listProviders: () => [], listModels: () => [] }) === undefined);
+  check("a provider with no models is rejected", pickModel({ listProviders: () => [{ id: "x", api: "dedicated" }], listModels: () => [] }) === undefined);
   check("text chunks concatenate", collectText([{ type: "text", delta: "a" }, { type: "text", delta: "b" }]) === "ab");
   check("plain-string chunks are accepted", collectText(["a", "b"]) === "ab");
 }
