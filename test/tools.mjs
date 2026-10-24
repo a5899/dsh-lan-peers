@@ -43,6 +43,8 @@ const applyCtx = {
   },
 };
 const svc = mod.apply(applyCtx, toolCfg());
+// Never let a test write into this package's own patch file.
+svc.patchFile = join(tmpdir(), "lan-peers-tools-unused.yml");
 await new Promise((r) => setTimeout(r, 100));
 
 check("all six tools registered", registered.length === 6, registered.map((t) => t.name).join(","));
@@ -52,6 +54,7 @@ const byName = Object.fromEntries(registered.map((t) => [t.name, t]));
 
 // 2. A second install on loopback that this one can reach.
 const peerSvc = new LanPeersService(ctx, toolCfg({ displayName: "peer-two", listenPort: 0, identitySuffix: "two" }));
+peerSvc.patchFile = join(tmpdir(), "lan-peers-tools-unused-2.yml");
 await peerSvc.start();
 await new Promise((r) => setTimeout(r, 80));
 svc.rememberPeer({

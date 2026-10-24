@@ -1,5 +1,36 @@
 # 更新记录
 
+## 1.2.0 — 2026-10-24
+
+### 修复：设置保存后重启丢失（感谢手机端 DSH 的排查）
+
+设置只改内存、不写盘，重启即丢。三个原因叠加：
+
+1. `ctx.loader` 在未声明 inject 的上下文里抛 `cannot get property "loader" without inject`；
+2. `loader.entries()` 是 **Generator**，对它调 `.find()` 会抛 `TypeError`，异常被外层 catch 吞掉；
+3. 即便拿到 entry，bundle 的条目挂在 loader **根 fiber** 下，插件 fiber 向上并不连通；
+   而且 `id: lan-peers` 这一行在**插件自己的** patch 文件里
+   (`<profile>/node_modules/dsh-lan-peers/cordis.patch.yml`)，改写 profile 根 patch 等于没写。
+
+现在：loader 不可达时，**直接原子重写插件自己的 patch**（tmp + rename），
+只替换传入的键、其余行逐字节保留（注释和引号风格都不动）。
+写回前用 YAML 解析器**回读校验**，校验不过就拒绝提交并报错。
+
+### 修复：界面谎报"已保存"
+
+- 保存结果现在真实反映是否落盘：失败时 `status.persisted === false`，
+  页面显示「已生效，但没写进配置文件（重启会丢）：<原因>」，不再显示"已保存"。
+- 路由响应不再用 `service.status()` 覆盖 `reconfigure()` 的持久化结论。
+
+### 修复：状态里的版本号
+
+`version` 原先硬编码 `"1.0.0"`，连续两个版本都没跟上。现在从 `package.json` 读取。
+
+### 开发
+
+- 修复测试会写进真实 `cordis.patch.yml` 的问题：所有测试使用隔离路径，
+  并加了"失败写入不得触碰真实安装"的断言。
+
 ## 1.1.1 — 2026-10-24
 
 ### 修复

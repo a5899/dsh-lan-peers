@@ -7,6 +7,13 @@ import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+// Keep every write out of this package's real cordis.patch.yml.
+const __isolatedPatch = (tag) => {
+  const { tmpdir: tmp } = process.getBuiltinModule("node:os");
+  return tmp() + "/lan-peers-test-" + tag + "-" + process.pid + ".yml";
+};
+
+
 const HOME = await mkdtemp(join(tmpdir(), "lan-peers-live-"));
 process.env.DSH_HOME = HOME;
 await mkdir(join(HOME, "plugins", "dsh-lan-peers"), { recursive: true });
@@ -27,7 +34,9 @@ const check = (label, cond, extra = "") => {
 };
 
 const a = new LanPeersService(ctx, cfg({ displayName: "live-a", identitySuffix: "aaa" }));
+a.patchFile = __isolatedPatch("live-a");
 const b = new LanPeersService(ctx, cfg({ displayName: "live-b", identitySuffix: "bbb" }));
+b.patchFile = __isolatedPatch("live-b");
 await a.start();
 await b.start();
 

@@ -18,6 +18,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+// Keep every write out of this package's real cordis.patch.yml.
+const __isolatedPatch = (tag) => {
+  const { tmpdir: tmp } = process.getBuiltinModule("node:os");
+  return tmp() + "/lan-peers-test-" + tag + "-" + process.pid + ".yml";
+};
+
+
 const HOME = await mkdtemp(join(tmpdir(), "lan-peers-routes-"));
 process.env.DSH_HOME = HOME;
 
@@ -115,6 +122,7 @@ function cordisCtx({ connection, webServer, declared = mod.inject || [], availab
 {
   const conn = makeConnection();
   const svc = mod.apply(cordisCtx({ connection: conn.service }), CONFIG);
+  svc.patchFile = __isolatedPatch("routes");
   await new Promise((r) => setTimeout(r, 100));
 
   const expected = [
@@ -174,6 +182,7 @@ function cordisCtx({ connection, webServer, declared = mod.inject || [], availab
   check("a ctx without the declaration still denies access", denied);
 
   const svc = mod.apply(ctx, CONFIG);
+  svc.patchFile = __isolatedPatch("routes2");
   await new Promise((r) => setTimeout(r, 100));
   check("registers despite the ctx denying eager reads", conn.routes.size === ROUTE_COUNT, `routes=${conn.routes.size} routeInfo=${JSON.stringify(svc.routeInfo)}`);
   check("routeInfo reports the connection path", svc.routeInfo?.kind === "connection", JSON.stringify(svc.routeInfo));
@@ -185,6 +194,7 @@ function cordisCtx({ connection, webServer, declared = mod.inject || [], availab
   const conn = makeConnection();
   const ctx = cordisCtx({ connection: null, available: false });
   const svc = mod.apply(ctx, CONFIG);
+  svc.patchFile = __isolatedPatch("routes2");
   await new Promise((r) => setTimeout(r, 80));
   check("declares the connection dependency at module level", Array.isArray(mod.inject) && mod.inject.includes("connection"), JSON.stringify(mod.inject));
 
@@ -202,6 +212,7 @@ function cordisCtx({ connection, webServer, declared = mod.inject || [], availab
   const registered = [];
   const ctx = cordisCtx({ connection: null, webServer: { register: (r) => { registered.push(r); return () => {}; } } });
   const svc = mod.apply(ctx, CONFIG);
+  svc.patchFile = __isolatedPatch("routes2");
   await new Promise((r) => setTimeout(r, 80));
   check("falls back to the web server", registered.length === 1 && registered[0].kind === "prefix", JSON.stringify(registered.map((r) => r.kind)));
   await svc.stop();
@@ -215,6 +226,7 @@ function cordisCtx({ connection, webServer, declared = mod.inject || [], availab
     webServer: { register: (r) => { registered.push(r); return () => {}; } },
   });
   const svc = mod.apply(ctx, CONFIG);
+  svc.patchFile = __isolatedPatch("routes2");
   await new Promise((r) => setTimeout(r, 80));
   check("a throwing registry falls back instead of crashing", registered.length === 1, `fallbacks=${registered.length}`);
   await svc.stop();

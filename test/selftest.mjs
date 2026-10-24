@@ -12,6 +12,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 
+// Keep every write out of this package's real cordis.patch.yml.
+const __isolatedPatch = (tag) => {
+  const { tmpdir: tmp } = process.getBuiltinModule("node:os");
+  return tmp() + "/lan-peers-test-" + tag + "-" + process.pid + ".yml";
+};
+
+
+
 // Isolate the identity/trust files before importing the module.
 const HOME = await mkdtemp(join(tmpdir(), "lan-peers-test-"));
 process.env.DSH_HOME = HOME;
@@ -47,6 +55,7 @@ function mkConfig(over = {}) {
 
 async function newService(config) {
   const service = new LanPeersService(mkCtx(), config);
+  service.patchFile = __isolatedPatch("selftest");
   await service.start();
   return service;
 }
