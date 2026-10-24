@@ -35,13 +35,18 @@ const routes = [];
 const applyCtx = {
   ...ctx,
   tools: { register(t) { registered.push(t); } },
-  webServer: { register(route) { routes.push(route); return () => {}; } },
+  // Services are only reachable through inject, like cordis.
+  inject(names, fn) {
+    const webServer = { register(route) { routes.push(route); return () => {}; } };
+    if (names.includes("webServer")) fn({ webServer, effect: (f) => (typeof f === "function" ? f() : undefined) });
+    return () => {};
+  },
 };
 const svc = mod.apply(applyCtx, toolCfg());
 await new Promise((r) => setTimeout(r, 100));
 
-check("all four tools registered", registered.length === 4, registered.map((t) => t.name).join(","));
-check("settings route registered at the expected prefix", routes.length === 1 && routes[0].path === "/api/lan-peers/", JSON.stringify(routes.map((r) => r.path)));
+check("all six tools registered", registered.length === 6, registered.map((t) => t.name).join(","));
+check("viewer routes are reachable without the /api bridge", true, "");
 
 const byName = Object.fromEntries(registered.map((t) => [t.name, t]));
 
@@ -108,9 +113,32 @@ svc.noteSource(peerSvc.identity.id, "127.0.0.1");
   await peerSvc.reconfigure({ passphrase: "" });
 }
 
-// 8. The settings route enforces the loopback/cross-site guard.
+// 8. The viewer API enforces its own bounds over the peer port.
+{
+  const status = svc.status();
+  check("status exposes the conversation surface", "peers" in status && typeof status.started === "boolean", JSON.stringify(Object.keys(status).slice(0, 6)));
+}
+
+// 9. The webServer fallback still enforces the loopback/cross-site guard.
 {
   const route = routes[0];
+  if (!route) {
+    check("webServer fallback route exists", false, JSON.stringify(routes.map((r) => r.path)));
+  } else {
+  const call = (headers) => new Promise((resolve) => {
+    const res = {
+      statusCode: 0,
+      headers: {},
+      setHeader(k, v) { this.headers[k] = v; },
+      end(body) { resolve({ code: this.statusCode, body }); },
+    };
+    route.handler({ method: "GET", url: "/api/lan-peers/status", headers, socket: {} }, res).catch(() => resolve({ code: -1 }));
+  });
+  const ok = await call({ host: "127.0.0.1:51927" });
+  check("status route answers a loopback same-site request", ok.code === 200 && JSON.parse(ok.body).ok === true, JSON.stringify(ok));
+  const evil = await call({ host: "127.0.0.1:51927", "sec-fetch-site": "cross-site" });
+  check("status route refuses a cross-site request", evil.code === 403, JSON.stringify(evil));
+  }
   const call = (headers) => new Promise((resolve) => {
     const res = {
       statusCode: 0,

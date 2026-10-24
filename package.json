@@ -14,11 +14,13 @@
   "files": [
     "lib/index.js",
     "lib/client.js",
+    "lib/viewer.js",
     "cordis.patch.yml",
     "README.md"
   ],
   "scripts": {
-    "test": "node test/selftest.mjs && node test/live.mjs && node test/tools.mjs && node test/e2e-process.mjs && node test/client-contract.mjs && node test/client-render.mjs"
+    "test": "node test/config.mjs && node test/routes.mjs && node test/selftest.mjs && node test/live.mjs && node test/tools.mjs && node test/e2e-process.mjs && node test/chat.mjs && node test/lan-reach.mjs && node test/client-contract.mjs && node test/client-render.mjs",
+    "shots": "node test/render-viewer.mjs"
   },
   "dsh": {
     "bundle": {

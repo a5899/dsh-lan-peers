@@ -35,6 +35,8 @@ const CONFIG = {
   manualPeers: "", askTimeoutMs: 5000, maxMessageChars: 8000,
 };
 
+const ROUTE_COUNT = 8;
+
 const makeConnection = () => {
   const routes = new Map();
   return {
@@ -60,8 +62,8 @@ function cordisCtx({ connection, webServer, available = true } = {}) {
     logger: { info() {}, warn() {}, error() {} },
     effect: (fn) => (typeof fn === "function" ? fn() : undefined),
     tools: { register() {} },
-    webServer: webServer ?? { register: () => () => {} },
     _injections: [],
+    _webInjections: [],
   };
   // Only an injected child may read the service, exactly like cordis.
   Object.defineProperty(ctx, "connection", {
@@ -72,14 +74,28 @@ function cordisCtx({ connection, webServer, available = true } = {}) {
     configurable: true,
   });
   ctx.inject = (names, fn) => {
-    ctx._injections.push({ names, fn });
-    if (!available || !names.includes("connection") || !connection) return () => {};
-    fn({
+    const child = {
       connection,
+      webServer,
       effect: (f) => (typeof f === "function" ? f() : undefined),
-    });
+    };
+    if (names.includes("connection")) {
+      ctx._injections.push({ names, fn });
+      if (available && connection) fn(child);
+    } else if (names.includes("webServer")) {
+      ctx._webInjections.push({ names, fn });
+      if (available && webServer) fn(child);
+    }
     return () => {};
   };
+  // webServer is also only visible through inject.
+  Object.defineProperty(ctx, "webServer", {
+    get() {
+      throw new Error('cannot get property "webServer" without inject');
+    },
+    enumerable: true,
+    configurable: true,
+  });
   return ctx;
 }
 
@@ -95,6 +111,9 @@ function cordisCtx({ connection, webServer, available = true } = {}) {
     ["/api/lan-peers/discover", ["POST"]],
     ["/api/lan-peers/trust", ["POST"]],
     ["/api/lan-peers/test", ["POST"]],
+    ["/api/lan-peers/conversations", ["GET"]],
+    ["/api/lan-peers/messages", ["GET"]],
+    ["/api/lan-peers/send", ["POST"]],
   ];
   check("registers on the connection fetch registry", conn.routes.size === expected.length, `${conn.routes.size} routes`);
   for (const [path, methods] of expected) {
@@ -142,7 +161,7 @@ function cordisCtx({ connection, webServer, available = true } = {}) {
 
   const svc = mod.apply(ctx, CONFIG);
   await new Promise((r) => setTimeout(r, 100));
-  check("registers despite the ctx denying eager reads", conn.routes.size === 5, `routes=${conn.routes.size} routeInfo=${JSON.stringify(svc.routeInfo)}`);
+  check("registers despite the ctx denying eager reads", conn.routes.size === ROUTE_COUNT, `routes=${conn.routes.size} routeInfo=${JSON.stringify(svc.routeInfo)}`);
   check("routeInfo reports the connection path", svc.routeInfo?.kind === "connection", JSON.stringify(svc.routeInfo));
   await svc.stop();
 }
@@ -156,7 +175,7 @@ function cordisCtx({ connection, webServer, available = true } = {}) {
   check("declares the connection dependency through inject", ctx._injections.length === 1 && ctx._injections[0].names.includes("connection"));
 
   ctx._injections[0].fn({ connection: conn.service, effect: (fn) => (typeof fn === "function" ? fn() : undefined) });
-  check("registers when connection appears", conn.routes.size === 5, `routes=${conn.routes.size}`);
+  check("registers when connection appears", conn.routes.size === ROUTE_COUNT, `routes=${conn.routes.size}`);
   check("routeInfo reports the connection path", svc.routeInfo?.kind === "connection", JSON.stringify(svc.routeInfo));
   await svc.stop();
 }

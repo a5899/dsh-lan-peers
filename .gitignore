@@ -19,3 +19,4 @@ desktop.ini
 identity.json
 trust.json
 *.tmp
+test/shots/

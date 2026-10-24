@@ -41,6 +41,38 @@ DSH **设置 → 插件 → 「LAN 邻居」**：
 | `lan_peer_ask` | 向某一台提问并取回回答 |
 | `lan_peer_tell` | 把一条信息推给某一台 |
 | `lan_peer_state` | 本机标识、地址、已知设备、信任列表、最近收发 |
+| `lan_peer_chat` | 和某一台**多轮对话**，沿用同一个 conversation id 保持上下文 |
+| `lan_peer_transcript` | 查看两台 DSH 之间聊过什么（会话列表 / 某个会话的完整记录） |
+
+## 对话记录网页
+
+每台设备的对端端口同时提供一个**网页版对话记录**，手机也能直接打开：
+
+```
+http://<这台电脑的内网IP>:45715/
+```
+
+- 设置页里「对话记录网页」一栏会把它显示成可点的链接。
+- 页面列出所有会话，点进去看完整往来（谁问的、谁答的、什么时候）。
+- 也能直接在网页上发起对话：选设备 → 输入 → 发送。
+- **手机适配**：`viewport` 自适应、刘海安全区、单列布局、按钮 ≥44px 触控尺寸、
+  长文本自动换行（不横向滚动）、跟随系统深色模式、忽略缩放。
+  已在 390px / 320px / 1280px 三种宽度用真实 Chromium 渲染验证：无横向溢出、无控制台错误。
+- 每 5 秒自动刷新一次。
+- 网页本身只读 + 发消息，**不能**改设置或信任列表——那些在 DSH 设置页里做。
+
+### 手机怎么连
+
+1. 手机和电脑在**同一个 Wi-Fi / 内网**；
+2. 电脑上打开 DSH 设置 → 插件 → LAN 邻居，确认「已启用」；
+3. 手机浏览器输入 `http://<电脑内网IP>:45715/`（IP 在设置页的「状态」里能看到）。
+4. Windows 防火墙：DSH 程序本身已有全端口入站放行规则，通常无需额外配置；
+   若手机打不开，检查是否被第三方安全软件拦截。
+
+## 记录存哪
+
+所有往来记在 `~/.dsh/plugins/dsh-lan-peers/transcript.jsonl`（一行一条 JSON），
+重启不丢、可被网页与工具读取。文件末尾即使被截断也只丢最后一条。
 
 ## 网络与安全
 
@@ -75,15 +107,21 @@ New-NetFirewallRule -DisplayName "DSH LAN peers (peer)" -Direction Inbound -Prot
 
 ```powershell
 cd C:\Users\a5093\Documents\deepseek-harness\default-workspace\lan-peers
-node test/selftest.mjs       # 信任门（三个根）/ 口令 / 询问-告知往返（两个实例）
-node test/live.mjs           # 真 UDP 多播发现 + 口令隔断
-node test/tools.mjs          # 四个工具 + 设置路由（跨站拒绝、阻止、禁用态提示）
-node test/e2e-process.mjs    # 跨进程端到端：另起一个进程当对端，真的问/真的告知
-node test/client-contract.mjs # 客户端契约（__ModuleLoader__ / plugins.item / 标签函数）
-node test/client-render.mjs   # 设置页在假 React 下渲染
+npm test                        # 全部 10 组
+node test/render-viewer.mjs     # 另外：用真实 Chromium 在手机/桌面宽度截图到 test/shots/
 ```
 
-全部 6 组通过（`npm test` 可一次跑完）。
+| 测试 | 覆盖 |
+|---|---|
+| `config.mjs` | 配置契约：坏类型/对象/NaN 都上报并回退，schema 不得用 `.volatile()` |
+| `routes.mjs` | 设置路由注册形状 + 假 cordis 上下文（未声明 inject 即抛错） |
+| `selftest.mjs` | 信任三个根 / 口令隔断 / ask-tell 往返 |
+| `live.mjs` | 真 UDP 多播发现 |
+| `tools.mjs` | 六个工具 + 网页兜底路由 |
+| `e2e-process.mjs` | 跨进程端到端（另一个进程当对端） |
+| `chat.mjs` | 对话、双向记录、落盘与重载、容错、网页与 API、手机布局要点 |
+| `lan-reach.mjs` | 通过真实局域网 IP 访问网页 |
+| `client-contract.mjs` / `client-render.mjs` | DSH 设置页契约与渲染 |
 
 ## 回滚
 
