@@ -1,6 +1,6 @@
 {
   "name": "dsh-lan-peers",
-  "version": "1.3.2",
+  "version": "1.4.0",
   "private": true,
   "description": "DSH plugin: LAN peer discovery, cross-device ask/tell/conversation between DSH installs on the same subnet, with a mobile-friendly transcript viewer. Off by default; only acts when the user asks.",
   "type": "module",
@@ -16,13 +16,12 @@
     "lib/client.js",
     "lib/viewer.js",
     "lib/patches.js",
-    "lib/model.js",
     "cordis.patch.yml",
     "README.md",
     "CHANGELOG.md"
   ],
   "scripts": {
-    "test": "node test/config.mjs && node test/routes.mjs && node test/persist.mjs && node test/persist-e2e.mjs && node test/discovery.mjs && node test/model.mjs && node test/llm-shape.mjs && node test/selftest.mjs && node test/live.mjs && node test/tools.mjs && node test/e2e-process.mjs && node test/chat.mjs && node test/lan-reach.mjs && node test/client-contract.mjs && node test/client-render.mjs && node test/verify-installed.mjs",
+    "test": "node test/config.mjs && node test/routes.mjs && node test/persist.mjs && node test/persist-e2e.mjs && node test/discovery.mjs && node test/no-model.mjs && node test/selftest.mjs && node test/live.mjs && node test/tools.mjs && node test/e2e-process.mjs && node test/chat.mjs && node test/lan-reach.mjs && node test/client-contract.mjs && node test/client-render.mjs && node test/verify-installed.mjs",
     "shots": "node test/render-viewer.mjs"
   },
   "dsh": {

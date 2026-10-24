@@ -1,5 +1,35 @@
 # 更新记录
 
+## 1.4.0 — 2026-10-24
+
+### 移除：调用模型生成回答
+
+「用本机模型回复对方的提问」整个移除。原因很直接：这个功能引入了本插件历史上
+最严重的事故 —— `llm.listModels()` 签名用错，异常穿透宿主请求处理器，**把 DSH 进程搞崩**。
+
+现在回到最初的、也是最可靠的语义：
+
+- 对方的提问由**确定性的主机信息**回答（名称 / 地址 / 版本），不跑模型、不花 token
+- 插件不再注入 `llm` 服务，`lib/model.js` 已删除
+- 设置页不再有相关开关
+- `status()` 不再有 `modelReplies` / `modelRoute` / `modelStats` / `lastModelError`
+
+保留的全部是基础能力：`lan_peer_discover` / `lan_peer_ask` / `lan_peer_tell` /
+`lan_peer_chat` / `lan_peer_transcript` / `lan_peer_state`，以及记录网页。
+
+### 同时采用（来自 Android 端实测的补丁）
+
+1. **设置页 401**：`credentials: "omit"` → `"same-origin"`。v1.2.0 起设置路由走
+   `ctx.connection.fetch.register`，在认证管线内，不带 cookie 必然 401。
+2. **布尔/数字类型丢失**：类型转换改用 `BOOLEAN_KEYS` / `NUMBER_KEYS` 集合，
+   未归类字段不再落进 `String()`。之前会把 `true` 存成 `'true'`，
+   下次启动 schema 校验失败，**整个插件挂载不上**。
+
+### 测试
+
+15 组。新增 `test/no-model.mjs` 锁住"模型功能确实不在了"：不注入 llm、
+没有相关配置、收到的提问绝不打到模型、类型转换仍正确、前端仍带凭据。
+
 ## 1.3.2 — 2026-10-24
 
 ### 严重修复：模型回复会让 DSH 整个崩掉
